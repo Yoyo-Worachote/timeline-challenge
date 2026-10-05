@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Timeline Challenge — เกมกระดานประวัติศาสตร์เวอร์ชันเว็บ เล่นหลายคนบนเครื่องเดียว">
+  <title>Timeline Challenge</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Kanit:wght@500;600;700&family=Sarabun:wght@400;600;700&display=swap">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body data-phase="HOME">
+  <section id="screen-home"></section>
+  <section id="screen-lobby" hidden></section>
+
+  <section id="screen-game" hidden>
+    <header class="topbar" id="topbar"></header>
+    <div class="layout">
+      <div class="board-col">
+        <div id="timeline-strip"></div>
+        <div id="board" class="board"></div>
+        <div class="legend">
+          <span style="--tc:#3fbf6f">Timeline 4</span>
+          <span style="--tc:#e2b93b">The Right Date</span>
+          <span style="--tc:#e5484d">The Bet</span>
+          <span style="--tc:#3b82f6">The Split</span>
+          <span style="--tc:#b061d6">The Combination</span>
+          <span class="lg-line">☠ ± เส้น Challenge</span>
+        </div>
+      </div>
+      <aside class="panel" id="panel" aria-live="polite"></aside>
+    </div>
+    <div class="players" id="players"></div>
+    <details class="log" id="log"></details>
+  </section>
+
+  <div id="modal" class="modal" hidden></div>
+  <div id="toasts" class="toasts" aria-live="assertive"></div>
+  <div id="confetti" class="confetti" aria-hidden="true"></div>
+
+  <!-- Engine (no DOM) -->
+  <script src="js/engine/core.js"></script>
+  <script src="js/data/cards.js"></script>
+  <script src="js/engine/rules.js"></script>
+  <script src="js/engine/deck.js"></script>
+  <script src="js/engine/trials.js"></script>
+  <script src="js/engine/movement.js"></script>
+  <script src="js/engine/challenges.js"></script>
+  <script src="js/engine/game.js"></script>
+  <!-- UI -->
+  <script src="js/ui/board.js"></script>
+  <script src="js/ui/wheels.js"></script>
+  <script src="js/ui/online.js"></script>
+  <script src="js/ui/app.js"></script>
+</body>
+</html>

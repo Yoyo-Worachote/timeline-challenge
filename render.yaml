@@ -1,0 +1,7 @@
+# One-click deploy on Render (https://render.com): New + > Blueprint > select this repository.
+services:
+  - type: web
+    name: timeline-challenge
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/health
