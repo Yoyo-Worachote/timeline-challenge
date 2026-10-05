@@ -66,12 +66,19 @@
   };
   var CHALLENGE_ORDER = ['SUDDEN_DEATH', 'MORE_OR_LESS'];
 
+  // The boxed game has the first five Travelers. The other five extend the game to
+  // 10 players (a project requirement, beyond the rulebook's components — see RULES.md).
   var TOKENS = [
     { id: 'biplane', name: 'เครื่องบินปีกสองชั้น', icon: '✈️', color: '#e8b04a' },
     { id: 'locomotive', name: 'รถจักรไอน้ำ', icon: '🚂', color: '#e5534b' },
     { id: 'car', name: 'รถยนต์', icon: '🚗', color: '#4aa3e8' },
     { id: 'ship', name: 'เรือใบ', icon: '⛵', color: '#4cc38a' },
-    { id: 'shuttle', name: 'กระสวยอวกาศ', icon: '🚀', color: '#b07ce8' }
+    { id: 'shuttle', name: 'กระสวยอวกาศ', icon: '🚀', color: '#b07ce8' },
+    { id: 'balloon', name: 'บอลลูน', icon: '🎈', color: '#9bd44a' },
+    { id: 'bicycle', name: 'จักรยาน', icon: '🚲', color: '#2fc6c6' },
+    { id: 'helicopter', name: 'เฮลิคอปเตอร์', icon: '🚁', color: '#ec6fb5' },
+    { id: 'horse', name: 'ม้า', icon: '🐎', color: '#a8744a' },
+    { id: 'camel', name: 'อูฐ', icon: '🐪', color: '#c8c8c8' }
   ];
 
   /**
@@ -111,7 +118,7 @@
     SPLIT_REWARD: 4,
     FIRST_TRIAL: 'T4',
     MIN_PLAYERS: 2,
-    MAX_PLAYERS: 5,
+    MAX_PLAYERS: TOKENS.length,   // one Traveler each: 10
     MAX_NAME_LENGTH: 24,
     MAX_YEAR_DIGITS: 4,
     TOKENS: TOKENS,

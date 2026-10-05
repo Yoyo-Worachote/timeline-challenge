@@ -39,6 +39,9 @@ var Host = {
   },
   restore: function (stateJson) {
     return JSON.stringify(TC.Game.restore(stateJson));
+  },
+  maxPlayers: function () {
+    return JSON.stringify(TC.Rules.MAX_PLAYERS);
   }
 };
 """
@@ -74,3 +77,7 @@ class Engine:
     def restore(self, state):
         """None if the stored state is not a valid game state."""
         return self._call('Host.restore', json.dumps(state))
+
+    def max_players(self):
+        """One person per Traveler, as defined by the engine's rules (10)."""
+        return self._call('Host.maxPlayers')

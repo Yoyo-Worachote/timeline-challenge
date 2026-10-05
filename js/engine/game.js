@@ -87,7 +87,7 @@
 
   function addPlayer(s, a) {
     requirePhase(s, PHASE.LOBBY);
-    if (s.players.length >= R.MAX_PLAYERS) U.fail('ผู้เล่นได้สูงสุด ' + R.MAX_PLAYERS + ' Traveler (เล่นเป็นทีมได้)');
+    if (s.players.length >= R.MAX_PLAYERS) U.fail('ผู้เล่นเต็ม ' + R.MAX_PLAYERS + ' คนแล้ว');
     var nm = String(a.name || '').trim();
     if (!nm) U.fail('กรุณาใส่ชื่อ');
     if (nm.length > R.MAX_NAME_LENGTH) U.fail('ชื่อยาวเกิน ' + R.MAX_NAME_LENGTH + ' ตัวอักษร');

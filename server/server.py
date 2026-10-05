@@ -32,9 +32,8 @@ DATA_FILE = Path(os.environ.get('TC_DATA', ROOT / 'server' / 'data' / 'rooms.jso
 
 CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'  # no 0/O, 1/I/L
 CODE_LENGTH = 5
-MAX_SEATS = 10           # people; up to 5 Travelers, team members share one (rulebook team rules)
-MAX_CLIENTS = 30         # seated players + spectators per room
 MAX_ROOMS = 500
+STALE_SECONDS = 60       # an offline lobby member without a Traveler may be dropped to make room after this
 ROOM_TTL = 24 * 3600     # idle rooms are deleted after a day
 HOST_GRACE = 120         # seconds a host may be offline before a seated player can take over
 MAX_BODY = 16 * 1024
@@ -86,9 +85,6 @@ class Room:
     def online(self, token):
         return bool(self.listeners.get(token))
 
-    def seat_count(self):
-        return sum(1 for c in self.clients.values() if c.get('playerId'))
-
     def player_ids(self):
         return [p['id'] for p in self.state['players']]
 
@@ -96,6 +92,7 @@ class Room:
 class Hub:
     def __init__(self, engine):
         self.engine = engine
+        self.capacity = engine.max_players()   # people per room = Travelers (10)
         self.rooms = {}
         self.lock = threading.RLock()
         self.dirty = False
@@ -173,24 +170,54 @@ class Hub:
             token = secrets.token_urlsafe(24)
             room = Room(self.new_code(), self.engine.create_lobby(secrets.randbits(32)), token)
             room.clients[token] = {'name': name, 'playerId': None}
+            room.last_seen[token] = time.time()
             self.rooms[room.code] = room
             self.dirty = True
             return room.code, token
 
     def join(self, code, name, token=None):
+        """A room holds at most `capacity` people (one per Traveler). Reconnects always succeed."""
         with self.lock:
             room = self.get(code)
-            if token and token in room.clients:            # reconnect: same identity, same seat
+            if token and token in room.clients:            # reconnect: same identity, same Traveler
                 return room.code, token, room.clients[token]['name']
             name = clean_name(name)
-            if len(room.clients) >= MAX_CLIENTS:
-                raise Denied('ห้องนี้เต็มแล้ว')
+            if len(room.clients) >= self.capacity:
+                self.drop_stale(room)
+            if len(room.clients) >= self.capacity:
+                raise Denied('ห้องเต็มแล้ว (%d / %d คน)' % (len(room.clients), self.capacity))
             token = secrets.token_urlsafe(24)
             room.clients[token] = {'name': name, 'playerId': None}
+            room.last_seen[token] = time.time()
             room.touched = time.time()
             self.dirty = True
         self.broadcast(room)
         return room.code, token, name
+
+    def drop_stale(self, room):
+        """In the lobby, people who left without a Traveler and stayed away free their place."""
+        if room.state['phase'] != 'LOBBY':
+            return
+        now = time.time()
+        for t in list(room.clients):
+            c = room.clients[t]
+            if not c.get('playerId') and not room.online(t) and now - room.last_seen.get(t, 0) > STALE_SECONDS:
+                self.remove_client(room, t)
+
+    def remove_client(self, room, token):
+        """Drop a person from the room; their Traveler (lobby only) goes back to the pool."""
+        seat = room.clients[token].get('playerId')
+        if seat:
+            result = self.engine.apply(room.state, {'type': 'REMOVE_PLAYER', 'playerId': seat})
+            if not result['ok']:
+                raise Denied(result['error'])
+            room.state = result['state']
+        del room.clients[token]
+        room.listeners.pop(token, None)
+        room.last_seen.pop(token, None)
+        if token == room.host and room.clients:
+            seated = [t for t, c in room.clients.items() if c.get('playerId')]
+            room.host = (seated or list(room.clients))[0]
 
     # ------------------------------------------------------------ actions
 
@@ -221,8 +248,6 @@ class Hub:
                 if kind == 'ADD_PLAYER':
                     if seat:
                         raise Denied('คุณมี Traveler แล้ว')
-                    if room.seat_count() >= MAX_SEATS:
-                        raise Denied('ผู้เล่นเต็ม %d คนแล้ว' % MAX_SEATS)
                     action = {'type': kind, 'name': action.get('name'), 'token': action.get('token'),
                               'members': '', 'seq': action.get('seq')}
                 elif kind in SELF_ACTIONS:
@@ -257,28 +282,23 @@ class Hub:
 
     def room_action(self, room, token, client, kind, action, lobby):
         seat = client.get('playerId')
-        if kind == 'ROOM_JOIN_TEAM':
-            # Rulebook team rules: several people share one Traveler token and Historical Board.
+        if kind == 'ROOM_LEAVE_SEAT':
+            # Give the Traveler back but stay in the room (e.g. to pick another one).
             if not lobby:
-                raise Denied('เข้าร่วมทีมได้เฉพาะก่อนเริ่มเกม')
-            if seat:
-                raise Denied('คุณมี Traveler แล้ว')
-            if action.get('playerId') not in room.player_ids():
-                raise Denied('ไม่พบ Traveler นี้')
-            if room.seat_count() >= MAX_SEATS:
-                raise Denied('ผู้เล่นเต็ม %d คนแล้ว' % MAX_SEATS)
-            client['playerId'] = action['playerId']
-        elif kind == 'ROOM_LEAVE_SEAT':
-            if not lobby:
-                raise Denied('ออกจากที่นั่งได้เฉพาะก่อนเริ่มเกม')
+                raise Denied('เปลี่ยน Traveler ได้เฉพาะก่อนเริ่มเกม')
             if not seat:
-                raise Denied('คุณยังไม่มีที่นั่ง')
+                raise Denied('คุณยังไม่มี Traveler')
+            result = self.engine.apply(room.state, {'type': 'REMOVE_PLAYER', 'playerId': seat})
+            if not result['ok']:
+                raise Denied(result['error'])
+            room.state = result['state']
             client['playerId'] = None
-            if not any(c.get('playerId') == seat for c in room.clients.values()):
-                result = self.engine.apply(room.state, {'type': 'REMOVE_PLAYER', 'playerId': seat})
-                if not result['ok']:
-                    raise Denied(result['error'])
-                room.state = result['state']
+        elif kind == 'ROOM_LEAVE':
+            # Leave the room for good. Mid-game a Traveler cannot leave the race (the engine has no
+            # such rule), so players just disconnect and may reconnect; spectators can leave any time.
+            if seat and not lobby:
+                raise Denied('ออกจากเกมที่กำลังเล่นไม่ได้ — ปิดหน้าเว็บได้ แล้วกลับเข้ามาต่อภายหลัง')
+            self.remove_client(room, token)
         elif kind == 'ROOM_REMATCH':
             if not self.is_host(room, token):
                 raise Denied('เฉพาะหัวห้องเท่านั้น')
@@ -301,7 +321,7 @@ class Hub:
                             'online': room.online(t), 'host': t == room.host, 'me': t == token})
         me = room.clients.get(token, {})
         return {'code': room.code, 'me': me.get('playerId'), 'myName': me.get('name'),
-                'isHost': token == room.host, 'members': members, 'maxSeats': MAX_SEATS}
+                'isHost': token == room.host, 'members': members, 'capacity': self.capacity}
 
     def broadcast(self, room):
         with self.lock:

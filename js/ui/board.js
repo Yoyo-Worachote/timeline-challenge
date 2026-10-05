@@ -20,7 +20,18 @@
   };
   var ICON = { T4: '????', BET: '?', SPLIT: '?|?', COMB: '1234' };
   var COLORS = { green: '#3fbf6f', red: '#e5484d', blue: '#3b82f6', yellow: '#e2b93b', purple: '#b061d6' };
-  var PAWN_OFFSETS = [[0, -30], [28, -8], [18, 26], [-18, 26], [-28, -8]];
+  /**
+   * Pawns sharing a space sit on a ring around it, sized so neighbouring pawns don't overlap;
+   * crowded spaces (up to 10 pawns) use smaller pawns.
+   */
+  function pawnPlace(k, n) {
+    if (n === 1) return { x: 0, y: -34, s: 1 };
+    var s = n <= 4 ? 1 : n <= 6 ? 0.8 : 0.7;
+    var r = Math.max(30, (PAWN_DIAMETER * s) / (2 * Math.sin(Math.PI / n)));
+    var a = -Math.PI / 2 + k * 2 * Math.PI / n;
+    return { x: Math.cos(a) * r, y: Math.sin(a) * r, s: s };
+  }
+  var PAWN_DIAMETER = 54;   // circle r=27 below
 
   function el(name, attrs, parent) {
     var n = document.createElementNS(NS, name);
@@ -140,8 +151,8 @@
         }
         g.querySelector('title').textContent = p.name + ' — ช่อง ' + p.position;
         var c = COORDS[pos];
-        var off = group.length === 1 ? [0, -34] : PAWN_OFFSETS[k % PAWN_OFFSETS.length];
-        g.style.transform = 'translate(' + (c[0] + off[0]) + 'px,' + (c[1] + off[1]) + 'px)';
+        var at = pawnPlace(k, group.length);
+        g.style.transform = 'translate(' + (c[0] + at.x) + 'px,' + (c[1] + at.y) + 'px) scale(' + at.s + ')';
         g.classList.toggle('is-winner', (view.winners || []).indexOf(p.id) !== -1);
       });
     });

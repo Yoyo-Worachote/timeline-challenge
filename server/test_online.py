@@ -22,6 +22,15 @@ ROOT = Path(__file__).resolve().parent.parent
 PORT = int(os.environ.get('TEST_PORT', '8799'))
 YEARS = {}
 results = []
+TOKENS = ['biplane', 'locomotive', 'car', 'ship', 'shuttle', 'balloon', 'bicycle', 'helicopter', 'horse', 'camel']
+
+
+def run_parallel(fns):
+    threads = [threading.Thread(target=f) for f in fns]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
 
 
 def load_years():
@@ -309,28 +318,34 @@ def main():
         assert A.me and B.me and A.me != B.me
     test('Server restart keeps the room; clients reconnect', restart)
 
-    def full_game():
-        """Play to Game Over over the network, exercising Sudden Death and More or Less (3 Travelers)."""
-        D = Client('Dan')
-        room_host = Client('Host').create().connect()
-        E = Client('Eve')
-        assert D.join(room_host.code)['ok'] and E.join(room_host.code)['ok']
-        D.connect(); E.connect()
-        players = [room_host, D, E]
-        for i, c in enumerate(players):
+    def make_room(n, prefix):
+        """A room with n people, each holding a different Traveler, all ready."""
+        host = Client(prefix + '1').create().connect()
+        people = [host]
+        for i in range(2, n + 1):
+            c = Client(prefix + str(i))
+            assert c.join(host.code)['ok'], 'player %d joins' % i
+            people.append(c.connect())
+        for i, c in enumerate(people):
             c.wait(lambda v: v['phase'] == 'LOBBY')
-            c.act({'type': 'ADD_PLAYER', 'name': c.name, 'token': ['car', 'ship', 'biplane'][i]})
+            c.act({'type': 'ADD_PLAYER', 'name': c.name, 'token': TOKENS[i]})
             c.wait(lambda v: v['room']['me'])
-        for c in players:
+        for c in people:
             c.act({'type': 'SET_READY', 'playerId': c.me, 'ready': True})
-        room_host.wait(lambda v: len(v['players']) == 3 and all(p['ready'] for p in v['players']))
-        room_host.act({'type': 'START_GAME'})
+        host.wait(lambda v: len(v['players']) == n and all(p['ready'] for p in v['players']))
+        tokens = [p['token'] for p in host.view['players']]
+        assert len(set(tokens)) == n, 'every Traveler is different'
+        return host, people
+
+    def play_game(n):
+        """Play to Game Over over the network with n players; returns the Challenges seen."""
+        host, players = make_room(n, 'G%d-' % n)
+        host.act({'type': 'START_GAME'})
         seen = set()
         turn = 0
-        for _ in range(400):
-            v = room_host.wait(lambda v: v['phase'] != 'LOBBY')
-            # every client must converge on the same state
-            for c in players:
+        for _ in range(2000):
+            v = host.wait(lambda v: v['phase'] != 'LOBBY')
+            for c in players:                    # every client converges on the same state
                 c.wait(lambda x, s=v['seq']: x['seq'] >= s)
             ph = v['phase']
             if ph == 'GAME_OVER':
@@ -340,34 +355,34 @@ def main():
                 for i, c in enumerate(players):
                     if v['trial']['answers'].get(c.me):
                         continue
-                    good = (turn + i) % 3 != 0 or i == 2       # player E plays perfectly, others mostly
+                    good = (turn + i) % 3 != 0 or i == n - 1   # last player perfect, others mostly
                     c.act({'type': 'SUBMIT_ANSWER', 'playerId': c.me,
-                           'answer': perfect(c.view) if good else blank(c.view)}, expect_ok=True)
-                room_host.wait(lambda x: x['phase'] != 'TRIAL_INPUT')
+                           'answer': perfect(c.view) if good else blank(c.view)})
+                host.wait(lambda x: x['phase'] != 'TRIAL_INPUT')
             elif ph == 'TRIAL_RESULT':
-                players[turn % 3].act({'type': 'CONTINUE'})
-                room_host.wait(lambda x, s=v['seq']: x['seq'] > s)
+                players[turn % n].act({'type': 'CONTINUE'})
+                host.wait(lambda x, s=v['seq']: x['seq'] > s)
             elif ph == 'TIEBREAK_CHOICE':
-                room_host.act({'type': 'RESOLVE_TIE', 'mode': 'SHARE'})
-                room_host.wait(lambda x, s=v['seq']: x['seq'] > s)
+                host.act({'type': 'RESOLVE_TIE', 'mode': 'SHARE'})
+                host.wait(lambda x, s=v['seq']: x['seq'] > s)
             elif ph == 'CHALLENGE':
                 ch = v['challenge']
                 seen.add(ch['type'])
                 if ch['stage'] == 'INTRO':
-                    room_host.act({'type': 'CHALLENGE_BEGIN'})
+                    host.act({'type': 'CHALLENGE_BEGIN'})
                 elif ch['stage'] == 'RESULT':
-                    room_host.act({'type': 'CONTINUE'})
+                    host.act({'type': 'CONTINUE'})
                 else:
                     cur = v['pendingActors'][0]
                     actor = [c for c in players if c.me == cur][0]
-                    others = [c for c in players if c.me != cur]
-                    others[0].act({'type': 'SD_PLACE' if ch['type'] == 'SUDDEN_DEATH' else 'MOL_GUESS',
-                                   'playerId': cur, 'slot': 0, 'year': 0}, expect_ok=False)   # not their turn
+                    other = [c for c in players if c.me != cur][0]
+                    other.act({'type': 'SD_PLACE' if ch['type'] == 'SUDDEN_DEATH' else 'MOL_GUESS',
+                               'playerId': cur, 'slot': 0, 'year': 0}, expect_ok=False)   # not their turn
                     if ch['type'] == 'SUDDEN_DEATH':
                         y = YEARS[ch['sd']['currentCardId']]
                         line = [YEARS[c] for c in ch['sd']['timeline']]
                         slot = sum(1 for t in line if t < y)
-                        if actor is not players[-1]:            # make non-final players misplace
+                        if cur != ch['active'][-1]:              # all but one participant misplace
                             slot = len(line) if slot == 0 else 0
                         actor.act({'type': 'SD_PLACE', 'playerId': cur, 'slot': slot})
                     else:
@@ -378,21 +393,106 @@ def main():
                             if g['verdict'] == 'less':
                                 hi = min(hi, g['year'] - 1)
                         actor.act({'type': 'MOL_GUESS', 'playerId': cur, 'year': (lo + hi) // 2})
-                room_host.wait(lambda x, s=v['seq']: x['seq'] > s)
+                host.wait(lambda x, s=v['seq']: x['seq'] > s)
         final = [c.wait(lambda x: x['phase'] == 'GAME_OVER') for c in players]
         assert all(f['winners'] == final[0]['winners'] and f['players'] == final[0]['players'] for f in final)
         assert final[0]['winners'], 'there is a winner'
-        assert 'SUDDEN_DEATH' in seen and 'MORE_OR_LESS' in seen, 'both Challenges were played: %s' % seen
+        assert len(final[0]['players']) == n
         for c in players:
             assert not c.privacy_errors, c.privacy_errors
-        room_host.act({'type': 'ROOM_REMATCH'})
+        host.act({'type': 'ROOM_REMATCH'})
         for c in players:
-            c.wait(lambda x: x['phase'] == 'LOBBY' and len(x['players']) == 3 and x['room']['me'])
-        D.act({'type': 'ROOM_REMATCH'}, expect_ok=False)
+            c.wait(lambda x: x['phase'] == 'LOBBY' and len(x['players']) == n and x['room']['me'])
+        players[1].act({'type': 'ROOM_REMATCH'}, expect_ok=False)
         for c in players:
             c.close()
-    test('Full 3-player game over the network: Challenges, Sudden Death, More or Less, Finish, Game Over, rematch',
-         full_game)
+        return seen
+
+    def full_game_2():
+        seen = play_game(2)
+        assert 'MORE_OR_LESS' not in seen, 'More or Less is skipped with two players'
+    test('2 players: full game over the network to Game Over', full_game_2)
+
+    def full_game_3():
+        seen = play_game(3)
+        assert seen == {'SUDDEN_DEATH', 'MORE_OR_LESS'}, seen
+    test('3 players: full game incl. Sudden Death + More or Less, Finish, Game Over, rematch', full_game_3)
+
+    for count in (5, 6, 10):
+        def full_game_n(n=count):
+            seen = play_game(n)
+            assert seen == {'SUDDEN_DEATH', 'MORE_OR_LESS'}, seen
+        test('%d players: everyone has a different Traveler; full game synced to Game Over' % count, full_game_n)
+
+    def capacity():
+        host, people = make_room(10, 'Cap')
+        late = Client('Eleventh')
+        r = late.join(host.code)
+        assert not r['ok'] and '10' in r['error'], r
+        assert len(host.view['room']['members']) == 10
+        # reconnect still works when the room is full, and returns the same Traveler
+        mine = people[4].me
+        people[4].close()
+        assert people[4].join(host.code, token=people[4].token)['ok']
+        people[4].view = None
+        people[4].connect().wait(lambda v: v['room']['me'] == mine)
+        state['cap'] = (host, people)
+    test('10th player joins, 11th is refused; reconnect in a full room keeps the same Traveler', capacity)
+
+    def leave_frees():
+        host, people = state['cap']
+        leaver = people[7]
+        freed = [p['token'] for p in host.view['players'] if p['id'] == leaver.me][0]
+        leaver.act({'type': 'ROOM_LEAVE'})
+        host.wait(lambda v: len(v['players']) == 9 and len(v['room']['members']) == 9)
+        assert freed not in [p['token'] for p in host.view['players']]
+        newcomer = Client('Newcomer')
+        assert newcomer.join(host.code)['ok'], 'the freed place can be taken'
+        newcomer.connect().wait(lambda v: v['phase'] == 'LOBBY')
+        newcomer.act({'type': 'ADD_PLAYER', 'name': 'Newcomer', 'token': freed})
+        host.wait(lambda v: len(v['players']) == 10 and freed in [p['token'] for p in v['players']])
+        assert not Client('Twelfth').join(host.code)['ok'], 'full again'
+        # giving back a Traveler without leaving also frees it
+        keeper = people[2]
+        token = [p['token'] for p in host.view['players'] if p['id'] == keeper.me][0]
+        keeper.act({'type': 'ROOM_LEAVE_SEAT'})
+        host.wait(lambda v: token not in [p['token'] for p in v['players']])
+        keeper.act({'type': 'ADD_PLAYER', 'name': 'Keeper', 'token': token})
+        host.wait(lambda v: len(v['players']) == 10)
+        for c in people + [newcomer]:
+            if c is not leaver:
+                c.close()
+    test('Leaving the lobby frees the Traveler and the place; a newcomer can take both', leave_frees)
+
+    def simultaneous():
+        host = Client('Race').create().connect()
+        joins = []
+
+        def join(i):
+            c = Client('R%d' % i)
+            joins.append((c, c.join(host.code)))
+        run_parallel([lambda i=i: join(i) for i in range(15)])
+        joined = [c for c, r in joins if r['ok']]
+        assert len(joined) == 9, 'host + 9 = 10 people, got %d' % (len(joined) + 1)
+
+        def grab(c, tok, out):
+            out.append((c, request('POST', '/api/rooms/%s/action' % c.code,
+                                   {'token': c.token, 'action': {'type': 'ADD_PLAYER', 'name': c.name, 'token': tok}})))
+        # everyone grabs the same Traveler at the same moment: exactly one wins
+        same = []
+        run_parallel([lambda c=c: grab(c, 'camel', same) for c in joined])
+        assert sum(1 for _, o in same if o['ok']) == 1, same
+        # the others grab different free Travelers at once: all succeed, no duplicates
+        losers = [c for c, o in same if not o['ok']]
+        free = [t for t in TOKENS if t != 'camel']
+        own = []
+        run_parallel([lambda c=c, t=free[i]: grab(c, t, own) for i, c in enumerate(losers)])
+        assert all(o['ok'] for _, o in own), own
+        host.wait(lambda v: len(v['players']) == 9)
+        tokens = [p['token'] for p in host.view['players']]
+        assert len(set(tokens)) == len(tokens) == 9
+        host.close()
+    test('Simultaneous joins and Traveler picks from many clients: capacity and uniqueness hold', simultaneous)
 
     def privacy():
         for c in (A, B, C):

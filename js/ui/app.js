@@ -115,8 +115,18 @@
     render();
   }
 
+  /**
+   * In the lobby (or as a spectator) leaving frees your place and Traveler for someone else.
+   * A Traveler in a running game cannot leave the race, so mid-game this only disconnects —
+   * "กลับเข้าห้อง" on the home screen brings you back to the same Traveler.
+   */
   function leaveRoom() {
-    goHome();
+    var v = store.view;
+    if (isOnline() && v && (v.phase === 'LOBBY' || !myId())) {
+      NET.send({ type: 'ROOM_LEAVE' }).then(function () { NET.forgetLast(); goHome(); });
+    } else {
+      goHome();
+    }
   }
 
   function joinOrReconnect(promise) {
@@ -307,29 +317,30 @@
       var free = R.TOKENS.filter(function (t) { return taken.indexOf(t.id) === -1; })[0];
       ui.lobbyToken = free ? free.id : null;
     }
-    var seats = room.members.filter(function (m) { return m.playerId; }).length;
-    var full = v.players.length >= R.MAX_PLAYERS || seats >= room.maxSeats;
+    var full = v.players.length >= R.MAX_PLAYERS;
     var allReady = v.players.length >= R.MIN_PLAYERS && v.players.every(function (p) { return p.ready; });
     var mine = me ? player(v, me) : null;
+    var ownerOf = {};
+    v.players.forEach(function (p) { ownerOf[p.token] = p.name; });
 
     var left;
     if (mine) {
       var mt = B.tokenOf(mine.token);
       left = '<div class="box"><h3>Traveler ของคุณ</h3><div class="me-card" style="--pc:' + mt.color + '"><span class="ptoken">' + mt.icon + '</span>' +
-        '<div class="grow"><b>' + esc(mine.name) + '</b><small>' + membersOf(v, me).map(function (m) { return esc(m.name); }).join(', ') + '</small></div></div>' +
+        '<div class="grow"><b>' + esc(mine.name) + '</b><small>' + esc(mt.name) + '</small></div></div>' +
         '<button class="btn ' + (mine.ready ? 'ok' : 'primary') + ' wide big" data-ready="' + me + '">' + (mine.ready ? '✓ พร้อมแล้ว (กดเพื่อยกเลิก)' : 'กดพร้อม') + '</button>' +
-        '<button class="btn ghost wide" data-act="leave-seat">ออกจากที่นั่ง</button></div>';
+        '<button class="btn ghost wide" data-act="leave-seat">คืน Traveler (เลือกตัวใหม่)</button></div>';
     } else {
-      left = '<form class="box" id="add-form" autocomplete="off"><h3>สร้าง Traveler ของคุณ</h3>' +
-        '<label class="field"><span>ชื่อ Traveler / ทีม</span><input id="f-name" maxlength="' + R.MAX_NAME_LENGTH + '" value="' + esc(room.myName || '') + '" ' + (full ? 'disabled' : '') + '></label>' +
-        '<div class="field"><span>เลือก Traveler token</span><div class="token-pick">' +
+      left = '<form class="box" id="add-form" autocomplete="off"><h3>เลือก Traveler ของคุณ</h3>' +
+        '<label class="field"><span>ชื่อที่แสดงในเกม</span><input id="f-name" maxlength="' + R.MAX_NAME_LENGTH + '" value="' + esc(room.myName || '') + '" ' + (full ? 'disabled' : '') + '></label>' +
+        '<div class="field"><span>Traveler (ว่าง ' + (R.TOKENS.length - taken.length) + ' / ' + R.TOKENS.length + ')</span><div class="token-pick">' +
         R.TOKENS.map(function (t) {
           var used = taken.indexOf(t.id) !== -1;
-          return '<button type="button" class="tok' + (ui.lobbyToken === t.id ? ' is-on' : '') + '" data-token="' + t.id + '" ' +
-            (used ? 'disabled' : '') + ' style="--pc:' + t.color + '" title="' + esc(t.name) + '"><span>' + t.icon + '</span><small>' + esc(t.name) + '</small></button>';
+          return '<button type="button" class="tok' + (ui.lobbyToken === t.id ? ' is-on' : '') + (used ? ' is-taken' : '') + '" data-token="' + t.id + '" ' +
+            (used ? 'disabled' : '') + ' style="--pc:' + t.color + '" title="' + esc(t.name) + (used ? ' — ' + esc(ownerOf[t.id]) + ' เลือกแล้ว' : '') + '">' +
+            '<span>' + t.icon + '</span><small>' + (used ? 'ไม่ว่าง · ' + esc(ownerOf[t.id]) : esc(t.name)) + '</small></button>';
         }).join('') + '</div></div>' +
-        '<button class="btn primary wide" type="submit" ' + (full || !ui.lobbyToken ? 'disabled' : '') + '>+ สร้าง Traveler</button>' +
-        '<p class="muted small">หรือกด "เข้าร่วมทีม" ที่ Traveler ของเพื่อน — เล่นเป็นทีม ใช้ token และ Historical Board ร่วมกัน</p></form>';
+        '<button class="btn primary wide" type="submit" ' + (full || !ui.lobbyToken ? 'disabled' : '') + '>' + (full ? 'Traveler เต็มแล้ว' : 'ยืนยัน Traveler นี้') + '</button></form>';
     }
 
     var roster = v.players.length ? '<ul class="roster">' + v.players.map(function (p) {
@@ -337,18 +348,18 @@
       var ms = membersOf(v, p.id);
       return '<li style="--pc:' + t.color + '"><span class="ptoken">' + t.icon + '</span>' +
         '<div class="grow"><b>' + esc(p.name) + (p.id === me ? ' <span class="b lead">คุณ</span>' : '') + '</b>' +
-        '<small>' + ms.map(memberLabel).join(', ') + '</small></div>' +
+        '<small>' + esc(t.name) + (ms.length ? ' · ' + ms.map(memberLabel).join(', ') : '') + '</small></div>' +
         (p.ready ? '<span class="b ok">✓ พร้อม</span>' : '<span class="b wait">ยังไม่พร้อม</span>') +
-        (!me && !full ? '<button class="btn ghost sm" data-team="' + p.id + '">เข้าร่วมทีม</button>' : '') +
         (room.isHost && p.id !== me ? '<button class="btn ghost sm icon" data-remove="' + p.id + '" aria-label="ลบ ' + esc(p.name) + '">✕</button>' : '') +
         '</li>';
-    }).join('') + '</ul>' : '<p class="empty">ยังไม่มี Traveler — ต้องมีอย่างน้อย 2</p>';
+    }).join('') + '</ul>' : '<p class="empty">ยังไม่มีผู้เล่นเลือก Traveler — ต้องมีอย่างน้อย 2</p>';
     var watchers = room.members.filter(function (m) { return !m.playerId; });
 
     $('screen-lobby').innerHTML = '<div class="lobby">' + roomBar(v) +
       '<div class="lobby-grid">' + left +
-      '<div class="box"><h3>Traveler <span class="muted">' + v.players.length + '/' + R.MAX_PLAYERS + ' · ผู้เล่น ' + seats + '/' + room.maxSeats + ' คน</span></h3>' + roster +
-      (watchers.length ? '<p class="muted small">ยังไม่มีที่นั่ง: ' + watchers.map(memberLabel).join(', ') + '</p>' : '') +
+      '<div class="box"><h3>ผู้เล่น <span class="player-count">' + v.players.length + ' / ' + R.MAX_PLAYERS + '</span>' +
+      '<span class="muted small"> · อยู่ในห้อง ' + room.members.length + ' / ' + room.capacity + ' คน</span></h3>' + roster +
+      (watchers.length ? '<p class="muted small">ยังไม่ได้เลือก Traveler: ' + watchers.map(memberLabel).join(', ') + '</p>' : '') +
       (room.isHost
         ? '<button class="btn primary wide big" id="start-game" ' + (allReady ? '' : 'disabled') + '>เริ่มเกม ▶</button>'
         : '<p class="muted center">รอหัวห้องกดเริ่มเกม</p>') +
@@ -440,7 +451,6 @@
       return;
     }
     if (t.dataset.remove) { dispatch({ type: 'REMOVE_PLAYER', playerId: t.dataset.remove }); return; }
-    if (t.dataset.team) { dispatch({ type: 'ROOM_JOIN_TEAM', playerId: t.dataset.team }); return; }
     if (t.dataset.act === 'leave-seat') { dispatch({ type: 'ROOM_LEAVE_SEAT' }); return; }
     if (t.dataset.act === 'home') { goHome(); return; }
     if (t.id === 'start-game') { ui.display = {}; dispatch({ type: 'START_GAME' }); return; }
