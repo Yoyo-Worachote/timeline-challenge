@@ -256,7 +256,7 @@ class Hub:
                 elif kind in SEATED_ACTIONS:
                     if not seat:
                         raise Denied('ผู้ชมทำรายการนี้ไม่ได้')
-                elif kind in ('START_GAME', 'REMOVE_PLAYER'):
+                elif kind in ('START_GAME', 'REMOVE_PLAYER', 'SET_MODE'):
                     if not self.is_host(room, token):
                         raise Denied('เฉพาะหัวห้องเท่านั้น')
                 elif kind == 'RESOLVE_TIE':

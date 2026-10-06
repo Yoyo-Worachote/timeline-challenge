@@ -337,10 +337,16 @@ def main():
         assert len(set(tokens)) == n, 'every Traveler is different'
         return host, people
 
-    def play_game(n):
+    def play_game(n, target=None):
         """Play to Game Over over the network with n players; returns the Challenges seen."""
-        host, players = make_room(n, 'G%d-' % n)
+        host, players = make_room(n, 'G%d-%s-' % (n, target or 'C'))
+        if target:
+            players[1].act({'type': 'SET_MODE', 'mode': 'SPEED_RUN', 'target': target}, expect_ok=False)  # host only
+            host.act({'type': 'SET_MODE', 'mode': 'SPEED_RUN', 'target': target})
+            for c in players:
+                c.wait(lambda x: x['mode'] == {'type': 'SPEED_RUN', 'target': target} and x['goal'] == target)
         host.act({'type': 'START_GAME'})
+        goal = target or 21
         seen = set()
         turn = 0
         for _ in range(2000):
@@ -348,6 +354,12 @@ def main():
             for c in players:                    # every client converges on the same state
                 c.wait(lambda x, s=v['seq']: x['seq'] >= s)
             ph = v['phase']
+            # Movement shows on the results screen; the win is decided on Continue. So once play has
+            # moved on to a new Trial or a Challenge round, nobody may be at the goal.
+            moved_on = ph == 'TRIAL_INPUT' or (ph == 'CHALLENGE' and v['challenge']['purpose'] == 'LINE'
+                                                and v['challenge']['stage'] != 'RESULT')
+            if moved_on:
+                assert all(p['position'] < goal for p in v['players']), 'someone reached %d but the game went on' % goal
             if ph == 'GAME_OVER':
                 break
             if ph == 'TRIAL_INPUT':
@@ -398,11 +410,17 @@ def main():
         assert all(f['winners'] == final[0]['winners'] and f['players'] == final[0]['players'] for f in final)
         assert final[0]['winners'], 'there is a winner'
         assert len(final[0]['players']) == n
+        pos = {p['id']: p['position'] for p in final[0]['players']}
+        assert all(pos[w] >= goal for w in final[0]['winners']), 'winner reached %d: %s' % (goal, pos)
+        if target:
+            assert all(f['mode'] == {'type': 'SPEED_RUN', 'target': target} for f in final)
+            players[0].act({'type': 'SET_MODE', 'mode': 'CLASSIC'}, expect_ok=False)   # locked after start
         for c in players:
             assert not c.privacy_errors, c.privacy_errors
         host.act({'type': 'ROOM_REMATCH'})
         for c in players:
             c.wait(lambda x: x['phase'] == 'LOBBY' and len(x['players']) == n and x['room']['me'])
+            assert c.view['goal'] == goal, 'rematch keeps the mode'
         players[1].act({'type': 'ROOM_REMATCH'}, expect_ok=False)
         for c in players:
             c.close()
@@ -423,6 +441,36 @@ def main():
             seen = play_game(n)
             assert seen == {'SUDDEN_DEATH', 'MORE_OR_LESS'}, seen
         test('%d players: everyone has a different Traveler; full game synced to Game Over' % count, full_game_n)
+
+    for target in (11, 15, 21):
+        def speed_game(t=target):
+            play_game(4, t)
+        test('Speed Run %d: host sets it, all clients see it, server ends the game at %d points' % (target, target),
+             speed_game)
+
+    def classic_mode():
+        play_game(3)
+    test('Classic mode unchanged: win only on the Finish space', classic_mode)
+
+    def mode_reconnect():
+        host, people = make_room(3, 'Mode')
+        host.act({'type': 'SET_MODE', 'mode': 'SPEED_RUN', 'target': 15})
+        people[2].wait(lambda v: v['goal'] == 15)
+        host.act({'type': 'START_GAME'})
+        people[2].wait(lambda v: v['phase'] == 'TRIAL_INPUT')
+        people[2].close()
+        assert people[2].join(host.code, token=people[2].token)['ok']
+        people[2].view = None
+        v = people[2].connect().wait(lambda v: v['phase'] == 'TRIAL_INPUT')
+        assert v['mode'] == {'type': 'SPEED_RUN', 'target': 15} and v['goal'] == 15
+        # a client cannot declare a winner or change the goal mid-game
+        for bogus in ({'type': 'GAME_OVER', 'winners': [people[1].me]}, {'type': 'SET_MODE', 'mode': 'SPEED_RUN', 'target': 11}):
+            for c in people:
+                c.act(bogus, expect_ok=False)
+        assert host.wait(lambda v: True)['phase'] == 'TRIAL_INPUT'
+        for c in people:
+            c.close()
+    test('Mode survives reconnect; clients cannot change it or declare a winner', mode_reconnect)
 
     def capacity():
         host, people = make_room(10, 'Cap')

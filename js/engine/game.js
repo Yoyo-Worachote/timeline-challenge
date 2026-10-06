@@ -37,6 +37,7 @@
       seq: 0,
       rng: (seed === undefined ? U.newSeed() : seed) >>> 0,
       phase: PHASE.LOBBY,
+      mode: { type: 'CLASSIC', target: null },
       nextPlayerNo: 1,
       players: [],
       deck: { draw: [], discard: [] },
@@ -59,7 +60,32 @@
       s.players.push({ id: p.id, name: p.name, token: p.token, members: p.members, ready: false, position: R.START });
     });
     s.nextPlayerNo = state.nextPlayerNo;
+    s.mode = modeOf(state);
     return s;
+  }
+
+  // ---------------------------------------------------------------- game mode
+
+  function modeOf(s) {
+    return s.mode ? { type: s.mode.type, target: s.mode.target } : { type: 'CLASSIC', target: null };
+  }
+
+  /** Points (spaces moved) needed to win: the Finish space, or the Speed Run target. */
+  function goal(s) {
+    var m = modeOf(s);
+    return m.type === 'SPEED_RUN' ? m.target : R.FINISH;
+  }
+
+  function setMode(s, a) {
+    requirePhase(s, PHASE.LOBBY);
+    if (R.MODES.indexOf(a.mode) === -1) U.fail('โหมดเกมไม่ถูกต้อง');
+    if (a.mode === 'CLASSIC') {
+      s.mode = { type: 'CLASSIC', target: null };
+      return;
+    }
+    var target = a.target === undefined ? R.SPEED_RUN_DEFAULT : a.target;
+    if (R.SPEED_RUN_TARGETS.indexOf(target) === -1) U.fail('แต้มเป้าหมายต้องเป็น ' + R.SPEED_RUN_TARGETS.join(', '));
+    s.mode = { type: 'SPEED_RUN', target: target };
   }
 
   // ---------------------------------------------------------------- helpers
@@ -119,7 +145,9 @@
     Deck.init(s);
     s.challengesPlayed = {};
     R.CHALLENGE_ORDER.forEach(function (c) { s.challengesPlayed[c] = false; });
-    log(s, 'game', 'เริ่มเกม! ทุก Traveler อยู่ที่ช่อง Start — Trial แรกคือ Timeline 4');
+    s.mode = modeOf(s);
+    log(s, 'game', 'เริ่มเกม! ' + (s.mode.type === 'SPEED_RUN' ? 'โหมด Speed Run — ใครได้ ' + s.mode.target + ' แต้มก่อนชนะ' : 'โหมด Classic — ใครถึง Finish ก่อนชนะ') +
+      ' · ทุก Traveler อยู่ที่ช่อง Start — Trial แรกคือ Timeline 4');
     startTrial(s, R.FIRST_TRIAL);
   }
 
@@ -176,12 +204,13 @@
 
   /** Win check first (the game ends at once), then Challenge lines, then the next Trial. */
   function afterMovement(s) {
-    var done = Move.finishers(s.players);
+    var done = Move.finishers(s.players, goal(s));
     if (done.length === 1) return gameOver(s, done);
     if (done.length > 1) {
       s.tie = { playerIds: done };
       s.phase = PHASE.TIEBREAK_CHOICE;
-      log(s, 'game', done.map(function (pid) { return name(s, pid); }).join(', ') + ' ถึง Finish พร้อมกัน!');
+      log(s, 'game', done.map(function (pid) { return name(s, pid); }).join(', ') +
+        (s.mode && s.mode.type === 'SPEED_RUN' ? ' ได้ ' + s.mode.target + ' แต้มพร้อมกัน!' : ' ถึง Finish พร้อมกัน!'));
       return;
     }
 
@@ -299,6 +328,7 @@
     ADD_PLAYER: addPlayer,
     REMOVE_PLAYER: removePlayer,
     SET_READY: setReady,
+    SET_MODE: setMode,
     START_GAME: startGame,
     SUBMIT_ANSWER: submitAnswer,
     CONTINUE: doContinue,
@@ -362,6 +392,8 @@
       Object.keys(state.trial.answers).forEach(function (pid) { locked[pid] = true; });
       v.trial.answers = locked;
     }
+    v.mode = modeOf(state);
+    v.goal = goal(state);
     v.pendingActors = pendingActors(state);
     v.leaders = state.players.length ? Move.leaders(state.players) : [];
     v.nextTrialType = state.players.length ? Move.leaderSpaceType(state) : null;
@@ -385,6 +417,7 @@
     rematch: rematch,
     applyAction: applyAction,
     getView: getView,
+    goal: goal,
     pendingActors: pendingActors,
     restore: restore
   };

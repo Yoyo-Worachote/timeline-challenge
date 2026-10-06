@@ -29,7 +29,8 @@
     modal: null,
     lobbyToken: null,
     seenRevealed: {},
-    celebrated: null
+    celebrated: null,
+    drafts: {}
   };
   var $ = function (id) { return document.getElementById(id); };
 
@@ -144,6 +145,42 @@
   function isSeated() { return !isOnline() || !!myId(); }
   function amHost() { return !isOnline() || !!(store.view && store.view.room && store.view.room.isHost); }
 
+  /**
+   * Answers being set but not yet locked live only here, keyed by room + Trial + player.
+   * Server updates never touch them, so a player's selection survives everyone else's actions,
+   * and closing / reopening the sheet resumes it.
+   */
+  function draftKey(v, pid) {
+    return (v.room ? v.room.code : 'local') + ':' + v.trial.no + ':' + pid;
+  }
+
+  function pruneDrafts(v) {
+    var prefix = v.trial ? draftKey(v, '') : null;
+    Object.keys(ui.drafts).forEach(function (k) {
+      if (!prefix || k.indexOf(prefix) !== 0) delete ui.drafts[k];
+    });
+  }
+
+  /** Re-render a container without losing what the user is typing in its inputs. */
+  function keepInputs(container, renderFn) {
+    var saved = {};
+    Array.prototype.forEach.call(container.querySelectorAll('input[id]:not([readonly])'), function (i) {
+      saved[i.id] = { value: i.value, start: i.selectionStart, end: i.selectionEnd };
+    });
+    var active = document.activeElement;
+    var focusId = active && active.id && container.contains(active) ? active.id : null;
+    renderFn();
+    Object.keys(saved).forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el && container.contains(el)) el.value = saved[id].value;
+    });
+    var f = focusId && document.getElementById(focusId);
+    if (f && container.contains(f)) {
+      f.focus();
+      try { f.setSelectionRange(saved[focusId].start, saved[focusId].end); } catch (e) { /* number inputs */ }
+    }
+  }
+
   function membersOf(v, pid) {
     if (!v.room) return [];
     return v.room.members.filter(function (m) { return m.playerId === pid; });
@@ -217,6 +254,7 @@
       return;
     }
     document.body.dataset.phase = v.phase;
+    pruneDrafts(v);
     var lobby = v.phase === G.PHASE.LOBBY;
     $('screen-lobby').hidden = !lobby;
     $('screen-game').hidden = lobby;
@@ -355,7 +393,7 @@
     }).join('') + '</ul>' : '<p class="empty">ยังไม่มีผู้เล่นเลือก Traveler — ต้องมีอย่างน้อย 2</p>';
     var watchers = room.members.filter(function (m) { return !m.playerId; });
 
-    $('screen-lobby').innerHTML = '<div class="lobby">' + roomBar(v) +
+    var lobbyHTML = '<div class="lobby">' + roomBar(v) + modeBox(v) +
       '<div class="lobby-grid">' + left +
       '<div class="box"><h3>ผู้เล่น <span class="player-count">' + v.players.length + ' / ' + R.MAX_PLAYERS + '</span>' +
       '<span class="muted small"> · อยู่ในห้อง ' + room.members.length + ' / ' + room.capacity + ' คน</span></h3>' + roster +
@@ -367,7 +405,40 @@
         allReady ? 'ทุกคนพร้อมแล้ว! Trial แรกคือ Timeline 4' : 'รอทุก Traveler กด "พร้อม"') + '</p>' +
       '</div></div>' +
       '<p class="lobby-foot"><button class="btn link" data-open="rules">อ่านกติกาฉบับย่อ</button></p></div>';
+    keepInputs($('screen-lobby'), function () { $('screen-lobby').innerHTML = lobbyHTML; });
     renderNet();
+  }
+
+  var TARGET_LABEL = { 11: 'Short', 15: 'Medium', 21: 'Long' };
+
+  /** Classic / Speed Run picker. Online, only the host may change it; everyone sees the same value. */
+  function modeBox(v) {
+    var m = v.mode, speed = m.type === 'SPEED_RUN', can = amHost();
+    function opt(attrs, label, on) {
+      return '<button type="button" class="mode-opt' + (on ? ' is-on' : '') + '" ' + attrs + (can ? '' : ' disabled') + '>' + label + '</button>';
+    }
+    return '<div class="box mode-box"><h3>โหมดเกม</h3><div class="mode-row">' +
+      opt('data-mode="CLASSIC"', '<b>Classic</b><small>ถึงช่อง Finish ก่อนชนะ (กติกาเดิม)</small>', !speed) +
+      opt('data-mode="SPEED_RUN"', '<b>Speed Run ⚡</b><small>ได้แต้มถึงเป้าก่อนชนะ</small>', speed) + '</div>' +
+      (speed ? '<div class="mode-row targets">' + R.SPEED_RUN_TARGETS.map(function (t) {
+        return opt('data-target="' + t + '"', '<b>' + t + ' แต้ม</b><small>' + TARGET_LABEL[t] +
+          (t === R.SPEED_RUN_DEFAULT ? ' · แนะนำ' : '') + (t === R.FINISH ? ' · ระยะเท่า Finish' : '') + '</small>', m.target === t);
+      }).join('') + '</div>' : '') +
+      '<p class="muted small">' + (speed
+        ? 'แต้ม = จำนวนช่องที่เดินบน Clock · Trial, Challenge, การเดิน และคะแนนเหมือนเดิมทุกอย่าง เปลี่ยนแค่เงื่อนไขชนะ'
+        : 'กติกาตาม rulebook ทั้งหมด') +
+      (can ? '' : ' · หัวห้องเป็นคนเลือก') + ' · เปลี่ยนไม่ได้หลังเริ่มเกม</p></div>';
+  }
+
+  function modeChip(v) {
+    return v.mode.type === 'SPEED_RUN'
+      ? '<span class="chip warn">⚡ Speed Run ' + v.mode.target + ' แต้ม</span>'
+      : '<span class="chip">Classic</span>';
+  }
+
+  function scoreText(v, p) {
+    if (v.mode.type === 'SPEED_RUN') return p.position + ' <span class="muted">/ ' + v.goal + ' แต้ม</span>';
+    return (p.position >= R.FINISH ? 'Finish!' : p.position === 0 ? 'Start' : 'ช่อง ' + p.position) + ' <span class="muted">/ ' + R.FINISH + '</span>';
   }
 
   function memberLabel(m) {
@@ -407,6 +478,7 @@
       '<div class="hero"><div class="hero-clock" aria-hidden="true">⏳</div>' +
       '<h1>Timeline Challenge</h1>' +
       '<p>แข่งเดินทางข้ามกาลเวลาบนหน้าปัดนาฬิกา — ผู้นำเป็นคนกำหนด Trial, คนที่ตามหลังได้ลุ้น Challenge, ใครถึง Finish ก่อนชนะ</p></div>' +
+      modeBox(v) +
       '<div class="lobby-grid">' +
       '<form class="box" id="add-form" autocomplete="off"><h3>เพิ่ม Traveler</h3>' +
       '<label class="field"><span>ชื่อผู้เล่น / ทีม</span><input id="f-name" maxlength="' + R.MAX_NAME_LENGTH + '" placeholder="เช่น มะลิ" ' + (full ? 'disabled' : '') + '></label>' +
@@ -436,9 +508,9 @@
       '<p class="lobby-foot"><button class="btn link" data-act="home">← หน้าแรก</button>' +
       '<button class="btn link" data-open="rules">อ่านกติกาฉบับย่อ</button></p>' +
       '</div>';
-    $('screen-lobby').innerHTML = html;
+    keepInputs($('screen-lobby'), function () { $('screen-lobby').innerHTML = html; });
     var name = $('f-name');
-    if (name && !full) name.focus();
+    if (name && !full && document.activeElement !== name) name.focus();
   }
 
   function onLobbyClick(e) {
@@ -452,6 +524,12 @@
     }
     if (t.dataset.remove) { dispatch({ type: 'REMOVE_PLAYER', playerId: t.dataset.remove }); return; }
     if (t.dataset.act === 'leave-seat') { dispatch({ type: 'ROOM_LEAVE_SEAT' }); return; }
+    if (t.dataset.mode) {
+      var cur = store.view.mode;
+      dispatch({ type: 'SET_MODE', mode: t.dataset.mode, target: cur.target || R.SPEED_RUN_DEFAULT });
+      return;
+    }
+    if (t.dataset.target) { dispatch({ type: 'SET_MODE', mode: 'SPEED_RUN', target: Number(t.dataset.target) }); return; }
     if (t.dataset.act === 'home') { goHome(); return; }
     if (t.id === 'start-game') { ui.display = {}; dispatch({ type: 'START_GAME' }); return; }
     if (t.id === 'demo-players') {
@@ -465,13 +543,18 @@
     e.preventDefault();
     if (isOnline()) { dispatch({ type: 'ADD_PLAYER', name: $('f-name').value, token: ui.lobbyToken }); return; }
     var ok = dispatch({ type: 'ADD_PLAYER', name: $('f-name').value, token: ui.lobbyToken, members: $('f-members').value });
-    if (ok) toast('เพิ่มผู้เล่นแล้ว', 'ok');
+    if (ok) {
+      $('f-name').value = '';
+      $('f-members').value = '';
+      toast('เพิ่มผู้เล่นแล้ว', 'ok');
+    }
   }
 
   // ------------------------------------------------------------ header / players / log
 
   function renderHeader(v) {
     var chips = [];
+    chips.push(modeChip(v));
     if (v.trial) chips.push('<span class="chip">Trial #' + v.trial.no + '</span>');
     if (v.trial) chips.push('<span class="chip">Trial: ' + trialBadge(v.trial.type) + '</span>');
     if (v.phase === 'CHALLENGE') chips.push('<span class="chip warn">⚔ ' + esc(R.CHALLENGES[v.challenge.type].name) + '</span>');
@@ -530,9 +613,8 @@
       return '<div class="pcard' + (acting ? ' is-acting' : '') + (p.id === myId() ? ' is-me' : '') + '" style="--pc:' + tok.color + '">' +
         '<div class="ptoken">' + tok.icon + '</div><div class="pinfo">' +
         '<div class="pname">' + esc(p.name) + (p.id === myId() ? ' <span class="b lead">คุณ</span>' : '') + (members ? ' <small>' + members + '</small>' : '') + '</div>' +
-        '<div class="ppos">' + (p.position >= R.FINISH ? 'Finish!' : p.position === 0 ? 'Start' : 'ช่อง ' + p.position) +
-        ' <span class="muted">/ ' + R.FINISH + '</span>' + (mv && mv.steps ? ' <span class="pmove">+' + mv.steps + '</span>' : '') + '</div>' +
-        '<div class="pbar"><i style="width:' + Math.round(p.position / R.FINISH * 100) + '%"></i></div>' +
+        '<div class="ppos">' + scoreText(v, p) + (mv && mv.steps ? ' <span class="pmove">+' + mv.steps + '</span>' : '') + '</div>' +
+        '<div class="pbar"><i style="width:' + Math.min(100, Math.round(p.position / v.goal * 100)) + '%"></i></div>' +
         '<div class="pbadges">' + badges.join('') + '</div></div></div>';
     }).join('');
   }
@@ -595,7 +677,7 @@
       case 'GAME_OVER': html = panelGameOver(v); break;
       default: html = '';
     }
-    $('panel').innerHTML = html;
+    keepInputs($('panel'), function () { $('panel').innerHTML = html; });
     var input = $('mol-year');
     if (input) input.focus();
   }
@@ -748,8 +830,9 @@
   }
 
   function panelTie(v) {
-    return '<div class="phead"><h2>เสมอที่ Finish!</h2><p>' +
-      v.tie.playerIds.map(function (id) { return who(v, id); }).join(' ') + ' ถึง Finish พร้อมกัน</p></div>' +
+    var where = v.mode.type === 'SPEED_RUN' ? 'ได้ ' + v.goal + ' แต้มพร้อมกัน' : 'ถึง Finish พร้อมกัน';
+    return '<div class="phead"><h2>เสมอ!</h2><p>' +
+      v.tie.playerIds.map(function (id) { return who(v, id); }).join(' ') + ' ' + where + '</p></div>' +
       '<div class="box"><p>ตามกติกา: จะจับมือชนะร่วมกัน หรือตัดสินด้วย Challenge "Sudden Death"</p>' +
       (!isOnline() || amHost() || v.tie.playerIds.indexOf(myId()) !== -1
         ? '<div class="row"><button class="btn ghost big" data-tie="SHARE">🤝 ชนะร่วมกัน</button>' +
@@ -761,9 +844,11 @@
     var ranking = v.players.slice().sort(function (a, b) { return b.position - a.position; });
     return '<div class="winner">' +
       '<div class="trophy">🏆</div><h2>' + v.winners.map(function (id) { return who(v, id); }).join(' และ ') + '</h2>' +
-      '<p>' + (v.winners.length > 1 ? 'ชนะร่วมกัน!' : 'ถึง Finish เป็นคนแรก — ชนะเกม!') + '</p></div>' +
+      '<p>' + (v.winners.length > 1 ? 'ชนะร่วมกัน!' : v.mode.type === 'SPEED_RUN'
+        ? 'ได้ ' + v.goal + ' แต้มเป็นคนแรก — ชนะ Speed Run!' : 'ถึง Finish เป็นคนแรก — ชนะเกม!') + '</p></div>' +
       '<ol class="ranking">' + ranking.map(function (p) {
-        return '<li>' + who(v, p.id) + '<span>' + (p.position >= R.FINISH ? 'Finish' : 'ช่อง ' + p.position) + '</span></li>';
+        return '<li>' + who(v, p.id) + '<span>' + (v.mode.type === 'SPEED_RUN' ? p.position + ' แต้ม'
+          : p.position >= R.FINISH ? 'Finish' : 'ช่อง ' + p.position) + '</span></li>';
       }).join('') + '</ol>' +
       (isOnline()
         ? '<div class="row">' + (amHost() ? '<button class="btn primary big" data-act="rematch">เล่นอีกครั้ง (ผู้เล่นเดิม)</button>' : '<p class="muted">รอหัวห้องเริ่มเกมใหม่</p>') +
@@ -811,6 +896,14 @@
     var host = $('modal');
     // A pending answer modal becomes stale if the game moved on or the player already locked.
     if (m && m.kind === 'answer' && (!v || v.phase !== 'TRIAL_INPUT' || v.trial.answers[m.playerId] || !canActFor(m.playerId))) m = ui.modal = null;
+    var sheetKey = m && m.kind === 'answer' && m.step === 'input' ? draftKey(v, m.playerId) : '';
+    if (sheetKey && host.dataset.sheet === sheetKey) {
+      // This player's answer sheet is already open for this Trial. Updates about *other*
+      // players (someone locked, joined, reconnected…) must not rebuild it: that would
+      // throw away the wheels this player is still setting.
+      return;
+    }
+    host.dataset.sheet = sheetKey;
     if (!m) { host.hidden = true; host.innerHTML = ''; return; }
     host.hidden = false;
 
@@ -838,7 +931,8 @@
             ui.modal = null;
             if (dispatch({ type: 'SUBMIT_ANSWER', playerId: p.id, answer: answer })) toast(p.name + ' ล็อกคำตอบแล้ว', 'ok');
           },
-          function () { ui.modal = null; render(); });
+          function () { ui.modal = null; render(); },
+          { initial: ui.drafts[sheetKey], onChange: function (draft) { ui.drafts[sheetKey] = draft; } });
         var first = host.querySelector('.wheel');
         if (first) first.focus();
       }

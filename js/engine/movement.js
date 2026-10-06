@@ -38,8 +38,10 @@
     return R.TRACK[maxPosition(state.players)];
   }
 
-  function finishers(players) {
-    return players.filter(function (p) { return p.position >= R.FINISH; }).map(function (p) { return p.id; });
+  /** Players who reached the winning total: the Finish space, or a Speed Run target. */
+  function finishers(players, goal) {
+    var need = goal === undefined ? R.FINISH : goal;
+    return players.filter(function (p) { return p.position >= need; }).map(function (p) { return p.id; });
   }
 
   TC.Movement = {

@@ -33,12 +33,23 @@
    * @param cards    public cards on the board (years hidden)
    * @param onLock   function(answer)
    * @param onCancel function()
+   * @param opts     { initial: {sign, wheels} — a draft to resume, onChange: function(draft) }
    */
-  function mount(host, type, cards, onLock, onCancel) {
+  function mount(host, type, cards, onLock, onCancel, opts) {
+    opts = opts || {};
     var spec = R.TRIALS[type];
     var state = { sign: '+', wheels: [] };
     for (var i = 0; i < spec.wheels; i++) state.wheels.push(spec.min);
+    var draft = opts.initial;
+    if (draft && Array.isArray(draft.wheels) && draft.wheels.length === spec.wheels) {
+      state.wheels = draft.wheels.slice();
+      if (draft.sign === '-' || draft.sign === '+') state.sign = draft.sign;
+    }
     var confirming = false;
+
+    function changed() {
+      if (opts.onChange) opts.onChange({ sign: state.sign, wheels: state.wheels.slice() });
+    }
 
     function summary() {
       if (type === 'SPLIT') return 'ห่างกัน <b>' + TC.Trials.wheelsToNumber(state.wheels) + '</b> ปี';
@@ -85,6 +96,7 @@
         var i = Number(key), span = spec.max - spec.min + 1;
         state.wheels[i] = spec.min + ((state.wheels[i] - spec.min + dir + span) % span);
       }
+      changed();
       render();
       var w = host.querySelector('[data-wheel="' + key + '"]');
       if (w) w.focus();
@@ -110,12 +122,12 @@
       else if (/^[0-9]$/.test(e.key) && w.dataset.wheel !== 'sign') {
         var v = Number(e.key);
         if (v >= spec.min && v <= spec.max) {
-          state.wheels[Number(w.dataset.wheel)] = v; confirming = false; render();
+          state.wheels[Number(w.dataset.wheel)] = v; confirming = false; changed(); render();
           var next = host.querySelector('[data-wheel="' + (Number(w.dataset.wheel) + 1) + '"]') || host.querySelector('[data-wheel="' + w.dataset.wheel + '"]');
           next.focus();
         }
       } else if ((e.key === '+' || e.key === '-') && w.dataset.wheel === 'sign') {
-        state.sign = e.key; confirming = false; render();
+        state.sign = e.key; confirming = false; changed(); render();
         host.querySelector('[data-wheel="sign"]').focus();
       }
     };

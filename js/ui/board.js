@@ -121,8 +121,10 @@
   function update(board, view, display) {
     var leaderPos = -1;
     view.players.forEach(function (p) { leaderPos = Math.max(leaderPos, p.position); });
+    var speedGoal = view.mode && view.mode.type === 'SPEED_RUN' ? view.goal : -1;
     board.spaces.forEach(function (g, i) {
       g.classList.toggle('is-leader', i === leaderPos && view.phase !== 'LOBBY');
+      g.classList.toggle('is-goal', i === speedGoal);
     });
     Object.keys(view.challengesPlayed || {}).forEach(function (id) {
       var g = board.svg.querySelector('[data-challenge="' + id + '"]');

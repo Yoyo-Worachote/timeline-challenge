@@ -20,7 +20,7 @@ python -m http.server 8765
 
 ## ทดสอบ
 
-เปิด http://localhost:8765/tests/ — ต้องขึ้น `PASS 34/34`
+เปิด http://localhost:8765/tests/ — ต้องขึ้น `PASS 42/42`
 ครอบคลุม: ตัวอย่างทุกข้อใน rulebook, setup, การตอบซ้ำ/ส่งซ้ำ/ผิดคน/ผิด phase, leader กำหนด Trial,
 ผู้นำเสมอกัน, Challenge trigger + ผู้เข้าร่วม + ลำดับ, Sudden Death หลายคน, More or Less,
 กติกา 2 ผู้เล่น, เกมจบระหว่าง movement, เสมอที่ Finish, refresh, reshuffle กอง และจำลองเกมเต็ม 100 เกม
@@ -106,6 +106,11 @@ python -m venv .venv
 
 ใช้กับโฮสต์ที่รัน Docker ได้ทุกเจ้า (Railway, Fly.io, VPS) — server อ่านพอร์ตจาก env `PORT`
 
+### โหมดเกม
+
+หัวห้องเลือกในห้องรอ: **Classic** (ถึง Finish = กติกาเดิม) หรือ **Speed Run** ⚡ (ได้ 11 / 15 / 21 แต้มก่อนชนะ ค่าเริ่มต้น 11)
+แต้ม = จำนวนช่องที่เดิน เปลี่ยนแค่เงื่อนไขชนะ server เป็นคนตัดสิน และเปลี่ยนไม่ได้หลังเริ่มเกม — รายละเอียดใน RULES.md
+
 ### Create / Join
 
 1. หน้าแรก → ใส่ชื่อ → **สร้างห้องใหม่** → ได้รหัสห้อง 5 ตัว + ปุ่ม **คัดลอกลิงก์เชิญ**
@@ -120,4 +125,4 @@ python -m venv .venv
 
 รัน server จริงแล้วใช้ client อิสระหลายตัวผ่าน HTTP+SSE: create/join, สิทธิ์, คำตอบลับ, reveal พร้อมกัน, sync movement/Trial,
 ผู้ชม, reconnect, รีสตาร์ท server, เกมเต็ม 3 คนจนจบ (Sudden Death + More or Less + Finish + Game Over + rematch)
-และตรวจทุก frame ว่าไม่มีข้อมูลลับหลุด — ต้องขึ้น `PASS 16/16` (รวมเกมเต็ม 2, 3, 5, 6, 10 คน, ห้องเต็ม 10 คน, คืน Traveler, กดพร้อมกันหลายเครื่อง)
+และตรวจทุก frame ว่าไม่มีข้อมูลลับหลุด — ต้องขึ้น `PASS 21/21` (รวมเกมเต็ม 2, 3, 5, 6, 10 คน, Speed Run 11/15/21, ห้องเต็ม 10 คน, คืน Traveler, กดพร้อมกันหลายเครื่อง)

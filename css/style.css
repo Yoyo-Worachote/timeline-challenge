@@ -92,6 +92,18 @@ h1, h2, h3 { font-family: var(--display); font-weight: 600; margin: 0; letter-sp
 .tok:disabled { opacity: .25; cursor: not-allowed; }
 .tok.is-taken { opacity: .4; border-style: dashed; }
 .tok.is-taken small { color: var(--bad); }
+.mode-box { margin-bottom: 18px; }
+.mode-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-bottom: 8px; }
+.mode-opt {
+  display: flex; flex-direction: column; gap: 2px; text-align: left; padding: 10px 12px; cursor: pointer;
+  background: var(--bg2); color: var(--text); border: 2px solid var(--line); border-radius: 12px; font: 15px var(--font);
+}
+.mode-opt small { color: var(--muted); font-size: 12px; }
+.mode-opt.is-on { border-color: var(--gold); background: color-mix(in srgb, var(--gold) 14%, var(--bg2)); }
+.mode-opt:disabled { cursor: default; opacity: .75; }
+.mode-opt:disabled:not(.is-on) { opacity: .35; }
+.space.is-goal .space-disc { stroke: var(--gold2); stroke-width: 10; }
+.space.is-goal .space-num { fill: var(--gold2); font-weight: 700; }
 .player-count { font: 700 18px var(--display); color: var(--gold2); margin-left: 6px; }
 .roster { list-style: none; padding: 0; margin: 0 0 4px; display: grid; gap: 8px; }
 .roster li { display: flex; align-items: center; gap: 10px; background: var(--bg2); border-left: 4px solid var(--pc); border-radius: 10px; padding: 8px 10px; }

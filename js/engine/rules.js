@@ -119,6 +119,12 @@
     FIRST_TRIAL: 'T4',
     MIN_PLAYERS: 2,
     MAX_PLAYERS: TOKENS.length,   // one Traveler each: 10
+    // Game modes. Points = spaces moved on the Clock (the only score the game has).
+    // CLASSIC: win on the Finish space (rulebook). SPEED_RUN: win at a lower point target;
+    // Trials, Challenges, movement and scoring are unchanged — only the win condition moves.
+    MODES: ['CLASSIC', 'SPEED_RUN'],
+    SPEED_RUN_TARGETS: [11, 15, 21],
+    SPEED_RUN_DEFAULT: 11,
     MAX_NAME_LENGTH: 24,
     MAX_YEAR_DIGITS: 4,
     TOKENS: TOKENS,
